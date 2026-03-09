@@ -62,27 +62,47 @@ async def delete_vacancy(session: AsyncSession, vacancy: Vacancy) -> None:
 async def upsert_external_vacancies(
     session: AsyncSession, payloads: Iterable[dict]
 ) -> int:
-    external_ids = [payload["external_id"] for payload in payloads if payload["external_id"]]
+    payload_items = list(payloads)
+    external_ids = {
+        payload["external_id"]
+        for payload in payload_items
+        if payload["external_id"] is not None
+    }
+
+    existing_vacancies_by_external_id: dict[int, Vacancy] = {}
     if external_ids:
         existing_result = await session.execute(
             select(Vacancy.external_id).where(Vacancy.external_id.in_(external_ids))
         )
         existing_ids = set(existing_result.scalars().all())
+        if existing_ids:
+            vacancies_result = await session.execute(
+                select(Vacancy).where(Vacancy.external_id.in_(existing_ids))
+            )
+            existing_vacancies_by_external_id = {
+                vacancy.external_id: vacancy
+                for vacancy in vacancies_result.scalars().all()
+                if vacancy.external_id is not None
+            }
     else:
-        existing_ids = {}
+        existing_ids = set()
 
     created_count = 0
-    for payload in payloads:
+    for payload in payload_items:
         ext_id = payload["external_id"]
-        if ext_id and ext_id in existing_ids:
-            result = await session.execute(
-                select(Vacancy).where(Vacancy.external_id == ext_id)
-            )
-            vacancy = result.scalar_one()
+        vacancy = (
+            existing_vacancies_by_external_id.get(ext_id)
+            if ext_id is not None
+            else None
+        )
+        if vacancy is not None:
             for field, value in payload.items():
                 setattr(vacancy, field, value)
         else:
-            session.add(Vacancy(**payload))
+            created = Vacancy(**payload)
+            session.add(created)
+            if ext_id is not None:
+                existing_vacancies_by_external_id[ext_id] = created
             created_count += 1
 
     await session.commit()

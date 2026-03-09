@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class VacancyBase(BaseModel):
@@ -12,7 +12,7 @@ class VacancyBase(BaseModel):
     published_at: datetime
     is_remote_available: bool
     is_hot: bool
-    external_id: Optional[int] = None
+    external_id: Optional[int] = Field(default=None, ge=1, le=2_147_483_647)
 
 
 class VacancyCreate(VacancyBase):

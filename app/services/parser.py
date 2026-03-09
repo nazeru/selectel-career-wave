@@ -10,12 +10,10 @@ from app.schemas.external import ExternalVacanciesResponse
 
 logger = logging.getLogger(__name__)
 
-API_URL = "https://api.selectel.ru/proxy/public/employee/api/public/vacancies"
-
 
 async def fetch_page(client: httpx.AsyncClient, page: int) -> ExternalVacanciesResponse:
     response = await client.get(
-        API_URL,
+        settings.api_url,
         params={"per_page": 1000, "page": page},
     )
     response.raise_for_status()
@@ -27,12 +25,12 @@ async def parse_and_store(session: AsyncSession) -> int:
     created_total = 0
 
     timeout = httpx.Timeout(10.0, read=20.0)
+    client = httpx.AsyncClient(timeout=timeout)
     try:
-        client = httpx.AsyncClient(timeout=timeout)
         page = 1
         while True:
             payload = await fetch_page(client, page)
-            parsed_payloads = []
+            parsed_payloads: List[dict] = []
             for item in payload.items:
                 parsed_payloads.append(
                     {
@@ -40,7 +38,7 @@ async def parse_and_store(session: AsyncSession) -> int:
                         "title": item.title,
                         "timetable_mode_name": item.timetable_mode.name,
                         "tag_name": item.tag.name,
-                        "city_name": item.city.name.strip(),
+                        "city_name": item.city.name.strip() if item.city else None,
                         "published_at": item.published_at,
                         "is_remote_available": item.is_remote_available,
                         "is_hot": item.is_hot,
@@ -56,6 +54,8 @@ async def parse_and_store(session: AsyncSession) -> int:
     except (httpx.RequestError, httpx.HTTPStatusError) as exc:
         logger.exception("Ошибка парсинга вакансий: %s", exc)
         return 0
+    finally:
+        await client.aclose()
 
     logger.info("Парсинг завершен, новых вакансий: %s", created_total)
     return created_total

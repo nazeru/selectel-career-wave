@@ -1,7 +1,6 @@
-from typing import List, Optional
+from typing import Annotated, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crud.vacancy import (
@@ -16,6 +15,7 @@ from app.db.session import async_session_maker
 from app.schemas.vacancy import VacancyCreate, VacancyRead, VacancyUpdate
 
 router = APIRouter(prefix="/vacancies", tags=["vacancies"])
+VacancyId = Annotated[int, Path(ge=1, le=2_147_483_647)]
 
 
 async def get_session() -> AsyncSession:
@@ -34,7 +34,7 @@ async def list_vacancies_endpoint(
 
 @router.get("/{vacancy_id}", response_model=VacancyRead)
 async def get_vacancy_endpoint(
-    vacancy_id: int, session: AsyncSession = Depends(get_session)
+    vacancy_id: VacancyId, session: AsyncSession = Depends(get_session)
 ) -> VacancyRead:
     vacancy = await get_vacancy(session, vacancy_id)
     if not vacancy:
@@ -49,28 +49,35 @@ async def create_vacancy_endpoint(
     if payload.external_id is not None:
         existing = await get_vacancy_by_external_id(session, payload.external_id)
         if existing:
-            return JSONResponse(
-                status_code=status.HTTP_200_OK,
-                content={"detail": "Vacancy with external_id already exists"},
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Vacancy with external_id already exists",
             )
     return await create_vacancy(session, payload)
 
 
 @router.put("/{vacancy_id}", response_model=VacancyRead)
 async def update_vacancy_endpoint(
-    vacancy_id: int,
+    vacancy_id: VacancyId,
     payload: VacancyUpdate,
     session: AsyncSession = Depends(get_session),
 ) -> VacancyRead:
     vacancy = await get_vacancy(session, vacancy_id)
     if not vacancy:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    if payload.external_id is not None:
+        existing = await get_vacancy_by_external_id(session, payload.external_id)
+        if existing and existing.id != vacancy.id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Vacancy with external_id already exists",
+            )
     return await update_vacancy(session, vacancy, payload)
 
 
 @router.delete("/{vacancy_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_vacancy_endpoint(
-    vacancy_id: int, session: AsyncSession = Depends(get_session)
+    vacancy_id: VacancyId, session: AsyncSession = Depends(get_session)
 ) -> None:
     vacancy = await get_vacancy(session, vacancy_id)
     if not vacancy:
